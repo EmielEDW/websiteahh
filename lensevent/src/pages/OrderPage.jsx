@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import DatePicker from 'react-datepicker'
+import 'react-datepicker/dist/react-datepicker.css'
 import './OrderPage.css'
 
 const TEMPLATE_COUNT = 50
@@ -9,7 +11,8 @@ export default function OrderPage() {
   const [form, setForm] = useState({
     name: '',
     companyNumber: '',
-    dates: '',
+    startDate: null,
+    endDate: null,
     template: '',
     indoor: 'inside',
     guests: 0,
@@ -25,24 +28,44 @@ export default function OrderPage() {
   const [price, setPrice] = useState(0)
 
   async function calculateDistance(address) {
-    if (!address) return
-    const encoded = encodeURIComponent(address)
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=Gent+Brabantdam+101&destinations=${encoded}&key=AIzaSyADPLhq5iTi--6wFEefDhnVw-0k-KAnO-g`
+    if (!address) return 0
     try {
-      const res = await fetch(url)
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+      )
       const data = await res.json()
-      const meters = data.rows[0].elements[0].distance.value
-      const km = meters / 1000
-      setDistance(km * 2) // heen en terug
+      if (!data[0]) return 0
+      const lat2 = parseFloat(data[0].lat)
+      const lon2 = parseFloat(data[0].lon)
+      const lat1 = 51.049329
+      const lon1 = 3.733906
+      const R = 6371
+      const dLat = ((lat2 - lat1) * Math.PI) / 180
+      const dLon = ((lon2 - lon1) * Math.PI) / 180
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2)
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+      const km = R * c
+      setDistance(km * 2)
       return km * 2
     } catch (e) {
       console.error(e)
+      return 0
     }
   }
 
   async function updatePrice(updated) {
     const dist = await calculateDistance(updated.address)
-    const days = updated.dates ? updated.dates.split(',').length : 0
+    let days = 0
+    if (updated.startDate && updated.endDate) {
+      days = Math.round(
+        (updated.endDate.getTime() - updated.startDate.getTime()) / 86400000
+      ) + 1
+    }
     const base = days * 399
     const extraKm = Math.max(0, (dist || 0) - 100) * 0.45
     const extraPrint = updated.extraPrints ? 70 : 0
@@ -53,7 +76,12 @@ export default function OrderPage() {
     const { name, value, type, checked } = e.target
     const updated = { ...form, [name]: type === 'checkbox' ? checked : value }
     setForm(updated)
-    if (name === 'address' || name === 'dates' || name === 'extraPrints') {
+    if (
+      name === 'address' ||
+      name === 'startDate' ||
+      name === 'endDate' ||
+      name === 'extraPrints'
+    ) {
       updatePrice(updated)
     }
   }
@@ -63,20 +91,71 @@ export default function OrderPage() {
     navigate('/checkout', { state: { form, price, distance } })
   }
 
+  const [suggestions, setSuggestions] = useState([])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function fetchSuggestions() {
+      if (!form.address || form.address.length < 3) {
+        setSuggestions([])
+        return
+      }
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(form.address)}`,
+          { signal: controller.signal }
+        )
+        const data = await res.json()
+        setSuggestions(data.slice(0, 5))
+      } catch (e) {
+        console.error(e)
+      }
+    }
+    fetchSuggestions()
+    return () => controller.abort()
+  }, [form.address])
+
   const templateOptions = Array.from({ length: TEMPLATE_COUNT }, (_, i) => (
     <option key={i} value={`template${i + 1}`}>{`Template ${i + 1}`}</option>
   ))
 
   return (
     <form className="order" onSubmit={handleSubmit}>
+      <div className="intro">
+        <img
+          src="https://images.unsplash.com/photo-1531058020387-3be344556be6?auto=format&fit=crop&w=1200&q=60"
+          alt="Event"
+        />
+      </div>
       <h2>Bestel photobooth</h2>
       <label>
         Naam en info
         <input name="name" value={form.name} onChange={handleChange} required />
       </label>
       <label>
-        Datums (gescheiden door comma)
-        <input name="dates" value={form.dates} onChange={handleChange} required />
+        Begin datum
+        <DatePicker
+          selected={form.startDate}
+          onChange={(date) => handleChange({ target: { name: 'startDate', value: date } })}
+          selectsStart
+          startDate={form.startDate}
+          endDate={form.endDate}
+          dateFormat="dd/MM/yyyy"
+          required
+        />
+      </label>
+      <label>
+        Eind datum
+        <DatePicker
+          selected={form.endDate}
+          onChange={(date) => handleChange({ target: { name: 'endDate', value: date } })}
+          selectsEnd
+          startDate={form.startDate}
+          endDate={form.endDate}
+          minDate={form.startDate}
+          dateFormat="dd/MM/yyyy"
+          required
+        />
       </label>
       <label>
         Template
@@ -102,15 +181,20 @@ export default function OrderPage() {
       </label>
       <label>
         Adres van event
-        <input name="address" value={form.address} onChange={handleChange} required />
+        <input list="address-list" name="address" value={form.address} onChange={handleChange} required />
+        <datalist id="address-list">
+          {suggestions.map((s) => (
+            <option key={s.place_id} value={s.display_name} />
+          ))}
+        </datalist>
       </label>
       <label>
         Uur opzetten
-        <input name="setupTime" value={form.setupTime} onChange={handleChange} required />
+        <input type="time" step="900" name="setupTime" value={form.setupTime} onChange={handleChange} required />
       </label>
       <label>
         Uur afbreken
-        <input name="breakdownTime" value={form.breakdownTime} onChange={handleChange} required />
+        <input type="time" step="900" name="breakdownTime" value={form.breakdownTime} onChange={handleChange} required />
       </label>
       <label>
         Wifi voorzien?

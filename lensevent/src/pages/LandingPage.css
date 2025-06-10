@@ -1,8 +1,25 @@
 .landing {
-  max-width: 800px;
+  max-width: 1000px;
   margin: 0 auto;
   padding: 2rem;
   text-align: center;
+}
+
+.landing .hero {
+  width: 100%;
+  max-height: 400px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.process {
+  text-align: left;
+  margin-top: 2rem;
+}
+
+.process ol {
+  padding-left: 1.5rem;
 }
 
 .order-button {
